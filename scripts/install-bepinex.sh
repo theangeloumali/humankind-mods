@@ -16,16 +16,16 @@ asset="BepInEx_win_x64_${BEPINEX_VERSION}.zip"
 release_json="$(curl -fsSL "https://api.github.com/repos/BepInEx/BepInEx/releases/tags/v${BEPINEX_VERSION}")"
 expected="$(printf '%s' "$release_json" | python3 -c "import json,sys; print(next(a['digest'] for a in json.load(sys.stdin)['assets'] if a['name']=='$asset').split(':',1)[1])")"
 
-mkdir "$work/download" "$work/extract"
-curl -fsSL -o "$work/download/$asset" "https://github.com/BepInEx/BepInEx/releases/download/v${BEPINEX_VERSION}/$asset"
-actual="$(sha256sum "$work/download/$asset" | cut -d' ' -f1)"
+mkdir "$work/extract"
+curl -fsSL -o "$work/$asset" "https://github.com/BepInEx/BepInEx/releases/download/v${BEPINEX_VERSION}/$asset"
+actual="$(sha256sum "$work/$asset" | cut -d' ' -f1)"
 if [ "$actual" != "$expected" ]; then
   echo "SHA-256 mismatch: expected $expected, got $actual" >&2
   exit 1
 fi
 echo "SHA-256 OK: $actual"
 
-unzip -q "$work/download/$asset" -d "$work/extract"
+unzip -q "$work/$asset" -d "$work/extract"
 (cd "$work/extract" && find . -type f | sed 's|^\./||' | sort) > "$work/files"
 while read -r rel; do
   if [ -e "$HUMANKIND_DIR/$rel" ]; then
@@ -34,6 +34,6 @@ while read -r rel; do
   fi
 done < "$work/files"
 
-(cd "$work/extract" && cp -r --update=none . "$HUMANKIND_DIR/")
+(cd "$work/extract" && cp -r . "$HUMANKIND_DIR/")
 cp "$work/files" "$INSTALLED_LIST"
 echo "Installed BepInEx $BEPINEX_VERSION ($(wc -l < "$work/files") files) into $HUMANKIND_DIR"

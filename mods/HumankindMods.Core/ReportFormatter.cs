@@ -45,10 +45,7 @@ namespace HumankindMods.Core
                 return "none";
             }
 
-            var causes = new StringBuilder();
-            if (counts.ADropped > 0) causes.Append("A ");
-            if (counts.BOrphaned + counts.BStuck > 0) causes.Append("B ");
-            return causes.ToString().TrimEnd();
+            return string.Join(" ", new[] { counts.ADropped > 0 ? "A" : null, counts.BOrphaned + counts.BStuck > 0 ? "B" : null }.Where(cause => cause != null));
         }
     }
 }

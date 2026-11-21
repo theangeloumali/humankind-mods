@@ -10,6 +10,7 @@
     <BepInExCore>$(HumankindDir)/BepInEx/core</BepInExCore>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)Shared/*.cs" Link="Shared/%(Filename)%(Extension)" />
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
     <ProjectReference Include="$(MSBuildThisFileDirectory)HumankindMods.Core/HumankindMods.Core.csproj" />
     <Reference Include="BepInEx" HintPath="$(BepInExCore)/BepInEx.dll" Private="false" />
@@ -28,4 +29,8 @@
     <Reference Include="Amplitude.Mercury.Firstpass" HintPath="$(ManagedDir)/Amplitude.Mercury.Firstpass.dll" Private="false" />
     <Reference Include="Amplitude.Mercury.Fx" HintPath="$(ManagedDir)/Amplitude.Mercury.Fx.dll" Private="false" />
   </ItemGroup>
+  <!-- dotnet build -p:Deploy=true copies each plugin and Core into the game's plugin folder. -->
+  <Target Name="DeployToGame" AfterTargets="Build" Condition="'$(Deploy)' == 'true'">
+    <Copy SourceFiles="$(TargetPath);$(OutDir)HumankindMods.Core.dll" DestinationFolder="$(HumankindDir)/BepInEx/plugins/ZKidz" />
+  </Target>
 </Project>

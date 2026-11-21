@@ -1,4 +1,3 @@
-using HumankindMods.Core;
 
 namespace HumankindMods.Core.Tests;
 
@@ -21,14 +20,5 @@ public class AutoPlayRequestTests
     public void Rejects_missing_or_non_positive_targets(string text)
     {
         Assert.Null(AutoPlayRequest.ParseTargetTurn(text));
-    }
-
-    [Theory]
-    [InlineData(349, 350, false)]
-    [InlineData(350, 350, true)]
-    [InlineData(351, 350, true)]
-    public void Target_is_reached_at_or_after_the_turn(int turn, int target, bool reached)
-    {
-        Assert.Equal(reached, AutoPlayRequest.IsReached(turn, target));
     }
 }

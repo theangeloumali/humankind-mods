@@ -14,21 +14,25 @@ namespace HumankindMods.Core
 
     public sealed class TrackedChannel
     {
-        public TrackedChannel(int componentId, int channel)
+        public TrackedChannel(int componentId, int channel, DistrictRenderState state, (int Column, int Row) tile, double pendingSince)
         {
             ComponentId = componentId;
             Channel = channel;
+            State = state;
+            Column = tile.Column;
+            Row = tile.Row;
+            PendingSince = pendingSince;
         }
 
         public int ComponentId { get; }
         public int Channel { get; }
         public DistrictRenderState State { get; internal set; }
-        public int Column { get; internal set; } = -1;
-        public int Row { get; internal set; } = -1;
-        public double PendingSince { get; internal set; }
+        public int Column { get; }
+        public int Row { get; }
+        public double PendingSince { get; }
     }
 
-    public readonly struct SpawnCounts
+    public readonly struct SpawnCounts : IEquatable<SpawnCounts>
     {
         public SpawnCounts(int bPending, int bOrphaned, int bStuck, int aDropped, int totalDrops, int worstDropFrame, int worstDropFrameCount)
         {
@@ -49,6 +53,13 @@ namespace HumankindMods.Core
         public int WorstDropFrame { get; }
         public int WorstDropFrameCount { get; }
         public int Invisible => BOrphaned + BStuck + ADropped;
+
+        public bool Equals(SpawnCounts other) =>
+            BPending == other.BPending && BOrphaned == other.BOrphaned && BStuck == other.BStuck && ADropped == other.ADropped && TotalDrops == other.TotalDrops;
+
+        public override bool Equals(object? obj) => obj is SpawnCounts other && Equals(other);
+
+        public override int GetHashCode() => (BPending, BOrphaned, BStuck, ADropped, TotalDrops).GetHashCode();
     }
 
     /// <summary>
@@ -58,7 +69,7 @@ namespace HumankindMods.Core
     public sealed class DistrictSpawnTracker
     {
         private readonly double stuckAfterSeconds;
-        private readonly Dictionary<(int, int), TrackedChannel> channels = new Dictionary<(int, int), TrackedChannel>();
+        private readonly Dictionary<int, Dictionary<int, TrackedChannel>> byComponent = new Dictionary<int, Dictionary<int, TrackedChannel>>();
         private readonly Dictionary<int, (int Column, int Row)> tiles = new Dictionary<int, (int, int)>();
         private int totalDrops;
         private int currentDropFrame = -1;
@@ -74,34 +85,30 @@ namespace HumankindMods.Core
         public void OnRefresh(int componentId, int channel, bool hasMaterial, bool ableToSpawn, int column, int row, double now)
         {
             tiles[componentId] = (column, row);
-            var key = (componentId, channel);
             if (!hasMaterial || ableToSpawn)
             {
-                channels.Remove(key);
+                Remove(componentId, channel);
                 return;
             }
 
-            if (channels.TryGetValue(key, out var existing) && existing.State == DistrictRenderState.BPending)
-            {
-                return;
-            }
-
-            channels[key] = NewEntry(componentId, channel, DistrictRenderState.BPending, now);
+            var channels = ChannelsOf(componentId);
+            if (channels.TryGetValue(channel, out var existing) && existing.State == DistrictRenderState.BPending) return;
+            channels[channel] = new TrackedChannel(componentId, channel, DistrictRenderState.BPending, TileOf(componentId), now);
         }
 
-        /// <summary>The adder writes channels in order, so the first <paramref name="written"/> succeeded.</summary>
-        public void OnSpawn(int componentId, IReadOnlyList<int> expectedChannels, int written, int frame)
+        /// <summary>AddParticle writes the due channels in ascending order, so the first <paramref name="written"/> succeeded.</summary>
+        public void OnSpawn(int componentId, ulong dueChannelMask, int written, int frame)
         {
-            for (var i = 0; i < expectedChannels.Count; i++)
+            for (var channel = 0; channel < 64 && dueChannelMask >> channel != 0; channel++)
             {
-                var key = (componentId, expectedChannels[i]);
-                if (i < written)
+                if ((dueChannelMask & (1UL << channel)) == 0) continue;
+                if (written-- > 0)
                 {
-                    channels.Remove(key);
+                    Remove(componentId, channel);
                     continue;
                 }
 
-                channels[key] = NewEntry(componentId, expectedChannels[i], DistrictRenderState.ADropped, 0);
+                ChannelsOf(componentId)[channel] = new TrackedChannel(componentId, channel, DistrictRenderState.ADropped, TileOf(componentId), 0);
                 CountDrop(frame);
             }
         }
@@ -109,62 +116,62 @@ namespace HumankindMods.Core
         public void OnUnload(int componentId)
         {
             tiles.Remove(componentId);
-            foreach (var key in channels.Keys.Where(k => k.Item1 == componentId).ToList())
-            {
-                channels.Remove(key);
-            }
+            byComponent.Remove(componentId);
         }
 
         public void Sweep(double now, Func<int, int, bool> isAbleToSpawn)
         {
-            foreach (var entry in channels.Values)
+            foreach (var entry in All())
             {
-                if (entry.State != DistrictRenderState.BPending && entry.State != DistrictRenderState.BStuck)
-                {
-                    continue;
-                }
-
-                if (isAbleToSpawn(entry.ComponentId, entry.Channel))
-                {
-                    entry.State = DistrictRenderState.BOrphaned;
-                }
-                else if (now - entry.PendingSince >= stuckAfterSeconds)
-                {
-                    entry.State = DistrictRenderState.BStuck;
-                }
+                if (entry.State != DistrictRenderState.BPending && entry.State != DistrictRenderState.BStuck) continue;
+                if (isAbleToSpawn(entry.ComponentId, entry.Channel)) entry.State = DistrictRenderState.BOrphaned;
+                else if (now - entry.PendingSince >= stuckAfterSeconds) entry.State = DistrictRenderState.BStuck;
             }
         }
 
-        public DistrictRenderState? StateOf(int componentId, int channel) =>
-            channels.TryGetValue((componentId, channel), out var entry) ? entry.State : (DistrictRenderState?)null;
+        internal DistrictRenderState? StateOf(int componentId, int channel) =>
+            byComponent.TryGetValue(componentId, out var channels) && channels.TryGetValue(channel, out var entry) ? entry.State : (DistrictRenderState?)null;
 
-        public IEnumerable<TrackedChannel> Invisible() =>
-            channels.Values.Where(c => c.State != DistrictRenderState.BPending);
+        public IEnumerable<TrackedChannel> Invisible() => All().Where(c => c.State != DistrictRenderState.BPending);
 
         public SpawnCounts GetCounts()
         {
-            int Count(DistrictRenderState state) => channels.Values.Count(c => c.State == state);
-            return new SpawnCounts(
-                Count(DistrictRenderState.BPending),
-                Count(DistrictRenderState.BOrphaned),
-                Count(DistrictRenderState.BStuck),
-                Count(DistrictRenderState.ADropped),
-                totalDrops,
-                worstDropFrame,
-                worstDropFrameCount);
-        }
-
-        private TrackedChannel NewEntry(int componentId, int channel, DistrictRenderState state, double now)
-        {
-            var entry = new TrackedChannel(componentId, channel) { State = state, PendingSince = now };
-            if (tiles.TryGetValue(componentId, out var tile))
+            int pending = 0, orphaned = 0, stuck = 0, dropped = 0;
+            foreach (var entry in All())
             {
-                entry.Column = tile.Column;
-                entry.Row = tile.Row;
+                switch (entry.State)
+                {
+                    case DistrictRenderState.BPending: pending++; break;
+                    case DistrictRenderState.BOrphaned: orphaned++; break;
+                    case DistrictRenderState.BStuck: stuck++; break;
+                    case DistrictRenderState.ADropped: dropped++; break;
+                }
             }
 
-            return entry;
+            return new SpawnCounts(pending, orphaned, stuck, dropped, totalDrops, worstDropFrame, worstDropFrameCount);
         }
+
+        private IEnumerable<TrackedChannel> All() => byComponent.Values.SelectMany(channels => channels.Values);
+
+        private Dictionary<int, TrackedChannel> ChannelsOf(int componentId)
+        {
+            if (!byComponent.TryGetValue(componentId, out var channels))
+            {
+                channels = new Dictionary<int, TrackedChannel>();
+                byComponent[componentId] = channels;
+            }
+
+            return channels;
+        }
+
+        private void Remove(int componentId, int channel)
+        {
+            if (!byComponent.TryGetValue(componentId, out var channels)) return;
+            channels.Remove(channel);
+            if (channels.Count == 0) byComponent.Remove(componentId);
+        }
+
+        private (int Column, int Row) TileOf(int componentId) => tiles.TryGetValue(componentId, out var tile) ? tile : (-1, -1);
 
         private void CountDrop(int frame)
         {
@@ -175,8 +182,7 @@ namespace HumankindMods.Core
                 currentDropFrameCount = 0;
             }
 
-            currentDropFrameCount++;
-            if (currentDropFrameCount > worstDropFrameCount)
+            if (++currentDropFrameCount > worstDropFrameCount)
             {
                 worstDropFrame = frame;
                 worstDropFrameCount = currentDropFrameCount;

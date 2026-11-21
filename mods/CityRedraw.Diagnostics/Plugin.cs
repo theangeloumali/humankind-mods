@@ -1,12 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using Amplitude.Mercury.Presentation;
 using BepInEx;
 using BepInEx.Configuration;
-using HarmonyLib;
 using HumankindMods.Core;
+using HumankindMods.Shared;
 using UnityEngine;
 
 namespace CityRedraw.Diagnostics
@@ -21,18 +20,28 @@ namespace CityRedraw.Diagnostics
         private const double StuckAfterSeconds = 60;
 
         private static readonly Dictionary<int, PresentationLevelBuildComponent> Components = new Dictionary<int, PresentationLevelBuildComponent>();
-        private static LineLog? log;
+        private static readonly List<int> Destroyed = new List<int>();
+        private static readonly Func<int, int, bool> IsAbleToSpawn = static (id, channel) =>
+            Components.TryGetValue(id, out var component) && GameStateReader.IsAbleToSpawn(component, channel);
+
+        private static LineLog log = null!;
 
         private ConfigEntry<KeyboardShortcut> reportKey = null!;
         private ConfigEntry<float> sweepSeconds = null!;
+        private GuardedHook updateHook = null!;
+        private Action updateBody = null!;
         private string outputDir = "";
+        private bool active;
         private float nextSweep;
         private int lastTurn = -1;
-        private int lastReportTurn = int.MinValue;
+        private int? lastReportTurn;
         private SpawnCounts lastCounts;
 
         internal static DistrictSpawnTracker Tracker { get; } = new DistrictSpawnTracker(StuckAfterSeconds);
-        internal static HookGuard Guard { get; } = new HookGuard(message => Write(message));
+        internal static GuardedHook SpawnPrefixHook { get; } = NewHook("AddParticle.Prefix");
+        internal static GuardedHook SpawnPostfixHook { get; } = NewHook("AddParticle.Postfix");
+        internal static GuardedHook RefreshHook { get; } = NewHook("RefreshChannel.Postfix");
+        internal static GuardedHook UnloadHook { get; } = NewHook("Unload.Postfix");
 
         internal static void Remember(PresentationLevelBuildComponent component) => Components[component.GetInstanceID()] = component;
 
@@ -42,7 +51,7 @@ namespace CityRedraw.Diagnostics
             Tracker.OnUnload(componentId);
         }
 
-        private static void Write(string message) => log?.Write(message);
+        private static GuardedHook NewHook(string name) => new GuardedHook(name, static message => log.Write(message));
 
         private void Awake()
         {
@@ -50,49 +59,39 @@ namespace CityRedraw.Diagnostics
             sweepSeconds = Config.Bind("Diagnostics", "SweepSeconds", 5f, "How often waiting districts are re-checked.");
             outputDir = Path.Combine(Paths.BepInExRootPath, "CityRedraw");
             log = new LineLog(Path.Combine(outputDir, "diagnostics.log"));
-
-            var harmony = new Harmony(PluginGuid);
-            try
-            {
-                harmony.PatchAll(typeof(Plugin).Assembly);
-            }
-            catch (Exception exception)
-            {
-                Write("patching failed, diagnostics inactive: " + exception);
-                Logger.LogError("CityRedraw Diagnostics patching failed: " + exception.Message);
-                return;
-            }
-
-            var patched = harmony.GetPatchedMethods().Select(m => m.Name).ToList();
-            Write("session start, patched: " + string.Join(", ", patched));
-            Logger.LogInfo("CityRedraw Diagnostics loaded, " + patched.Count + " patches applied: " + string.Join(", ", patched));
+            updateHook = NewHook("Plugin.Update");
+            updateBody = UpdateBody;
+            active = PluginSupport.TryPatchAll(PluginGuid, log, Logger, GameStateReader.EnsureReady);
         }
 
         private void Update()
         {
-            Guard.Run("Plugin.Update", () =>
-            {
-                if (reportKey.Value.IsDown()) WriteReport("hotkey");
-                if (Time.realtimeSinceStartup >= nextSweep)
-                {
-                    nextSweep = Time.realtimeSinceStartup + sweepSeconds.Value;
-                    Sweep();
-                }
-
-                var turn = CurrentTurn();
-                if (turn != lastTurn && turn >= 0) OnNewTurn(turn);
-            });
+            if (active) updateHook.Run(updateBody);
         }
 
-        private void Sweep()
+        private void UpdateBody()
         {
-            foreach (var destroyed in Components.Where(pair => pair.Value == null).Select(pair => pair.Key).ToList())
+            if (reportKey.Value.IsDown()) WriteReport("hotkey");
+            if (Time.realtimeSinceStartup >= nextSweep)
             {
-                Forget(destroyed);
+                nextSweep = Time.realtimeSinceStartup + sweepSeconds.Value;
+                Sweep();
             }
 
-            Tracker.Sweep(Time.realtimeSinceStartup, (id, channel) =>
-                Components.TryGetValue(id, out var component) && GameStateReader.IsAbleToSpawn(component, channel));
+            var turn = PluginSupport.CurrentTurn();
+            if (turn != lastTurn && turn >= 0) OnNewTurn(turn);
+        }
+
+        private static void Sweep()
+        {
+            Destroyed.Clear();
+            foreach (var pair in Components)
+            {
+                if (pair.Value == null) Destroyed.Add(pair.Key);
+            }
+
+            foreach (var id in Destroyed) Forget(id);
+            Tracker.Sweep(Time.realtimeSinceStartup, IsAbleToSpawn);
         }
 
         private void OnNewTurn(int turn)
@@ -101,27 +100,21 @@ namespace CityRedraw.Diagnostics
             var counts = Tracker.GetCounts();
             if (!counts.Equals(lastCounts))
             {
-                Write($"turn {turn}: components {Components.Count}, B-pending {counts.BPending}, B-orphaned {counts.BOrphaned}, " +
-                      $"B-stuck {counts.BStuck}, A-dropped {counts.ADropped}, drops {counts.TotalDrops}");
+                log.Write($"turn {turn}: components {Components.Count}, B-pending {counts.BPending}, B-orphaned {counts.BOrphaned}, " +
+                          $"B-stuck {counts.BStuck}, A-dropped {counts.ADropped}, drops {counts.TotalDrops}");
                 lastCounts = counts;
             }
 
-            var firstInvisible = counts.Invisible > 0 && lastReportTurn == int.MinValue;
-            if (firstInvisible || (counts.Invisible > 0 && turn - lastReportTurn >= ReportEveryTurns))
-            {
-                WriteReport("auto");
-            }
+            if (counts.Invisible > 0 && (lastReportTurn == null || turn - lastReportTurn >= ReportEveryTurns)) WriteReport("auto");
         }
 
         private void WriteReport(string trigger)
         {
-            var turn = CurrentTurn();
+            var turn = PluginSupport.CurrentTurn();
             lastReportTurn = turn;
             var path = Path.Combine(outputDir, $"report-turn{turn}-{DateTime.Now:yyyyMMdd-HHmmss}.txt");
             File.WriteAllText(path, ReportFormatter.Format(Tracker, turn, Components.Count, ReportRows));
-            Write($"report ({trigger}) written: {path}");
+            log.Write($"report ({trigger}) written: {path}");
         }
-
-        private static int CurrentTurn() => Amplitude.Mercury.Interop.AI.Snapshots.Game?.Turn ?? -1;
     }
 }

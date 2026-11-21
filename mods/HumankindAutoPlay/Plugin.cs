@@ -4,6 +4,7 @@ using Amplitude.Mercury.AI;
 using BepInEx;
 using BepInEx.Configuration;
 using HumankindMods.Core;
+using HumankindMods.Shared;
 using UnityEngine;
 
 namespace HumankindAutoPlay
@@ -20,7 +21,8 @@ namespace HumankindAutoPlay
         private string requestPath = "";
         private string donePath = "";
         private LineLog log = null!;
-        private HookGuard guard = null!;
+        private GuardedHook updateHook = null!;
+        private Action updateBody = null!;
         private int? targetTurn;
         private bool active;
         private int lastTurn = -1;
@@ -34,30 +36,32 @@ namespace HumankindAutoPlay
             requestPath = Path.Combine(dir, "request.txt");
             donePath = Path.Combine(dir, "done.txt");
             log = new LineLog(Path.Combine(dir, "progress.log"));
-            guard = new HookGuard(log.Write);
+            updateHook = new GuardedHook("AutoPlay.Update", log.Write);
+            updateBody = UpdateBody;
             stopKey = Config.Bind("AutoPlay", "StopKey", new KeyboardShortcut(KeyCode.F12, KeyCode.LeftControl), "Stops autoplay and hands control back.");
 
             targetTurn = File.Exists(requestPath) ? AutoPlayRequest.ParseTargetTurn(File.ReadAllText(requestPath)) : null;
             log.Write(targetTurn.HasValue ? "armed, target turn " + targetTurn : "idle (no request.txt)");
-            Logger.LogInfo("Humankind AutoPlay loaded, " + (targetTurn.HasValue ? "target turn " + targetTurn : "idle"));
+            Logger.LogInfo(targetTurn.HasValue ? "loaded, target turn " + targetTurn : "loaded, idle");
         }
 
         private void Update()
         {
-            if (!targetTurn.HasValue) return;
-            guard.Run("AutoPlay.Update", () =>
-            {
-                if (active && stopKey.Value.IsDown())
-                {
-                    Stop("stopped by hotkey");
-                    return;
-                }
+            if (targetTurn.HasValue) updateHook.Run(updateBody);
+        }
 
-                var game = Amplitude.Mercury.Interop.AI.Snapshots.Game;
-                if (game == null || !Amplitude.Mercury.Presentation.Presentation.HasBeenStarted) return;
-                if (!active) Start(game.Turn);
-                if (game.Turn != lastTurn) OnTurn(game.Turn);
-            });
+        private void UpdateBody()
+        {
+            if (active && stopKey.Value.IsDown())
+            {
+                Stop("stopped by hotkey");
+                return;
+            }
+
+            var turn = PluginSupport.CurrentTurn();
+            if (turn < 0 || !Amplitude.Mercury.Presentation.Presentation.HasBeenStarted) return;
+            if (!active) Start(turn);
+            if (turn != lastTurn) OnTurn(turn);
         }
 
         private void Start(int turn)
@@ -78,12 +82,11 @@ namespace HumankindAutoPlay
             lastTurnAt = Time.realtimeSinceStartup;
             lastTurn = turn;
             log.Write($"turn {turn} ({seconds:0}s)");
-            if (AutoPlayRequest.IsReached(turn, targetTurn!.Value))
-            {
-                File.WriteAllText(donePath, "turn " + turn + " at " + DateTime.Now.ToString("o"));
-                Stop("target turn reached");
-                UnityEngine.Application.Quit();
-            }
+            if (turn < targetTurn) return;
+
+            File.WriteAllText(donePath, "turn " + turn + " at " + DateTime.Now.ToString("o"));
+            Stop("target turn reached");
+            UnityEngine.Application.Quit();
         }
 
         // Deleting the request keeps a relaunch from resuming a run that was finished or cancelled.

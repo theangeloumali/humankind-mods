@@ -19,6 +19,9 @@ require_game_dir
 require_game_closed
 [ -f "$HUMANKIND_DIR/BepInEx/plugins/ZKidz/HumankindAutoPlay.dll" ] || { echo "Run deploy-plugins.sh first." >&2; exit 1; }
 
+acquire_game_lock 60 || exit 1
+trap release_game_lock EXIT
+
 mkdir -p "$AUTOPLAY_DIR"
 rm -f "$AUTOPLAY_DIR/done.txt"
 printf '%s\n' "$turns" > "$AUTOPLAY_DIR/request.txt"
@@ -34,7 +37,7 @@ while :; do
   echo "$(date '+%F %T') launch $launches (target turn $turns)"
   "$STEAM_EXE" -applaunch 1124300 --loadlatest --novideo >/dev/null 2>&1 &
   wait_for_start || { echo "Humankind did not start within 5 minutes." >&2; break; }
-  while game_running; do sleep 30; done
+  while game_running; do renew_game_lock 60; sleep 30; done
 
   [ -f "$AUTOPLAY_DIR/done.txt" ] && { echo "Target reached: $(cat "$AUTOPLAY_DIR/done.txt")"; break; }
   [ -f "$AUTOPLAY_DIR/request.txt" ] || { echo "Autoplay was stopped in game."; break; }

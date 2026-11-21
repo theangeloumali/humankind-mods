@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
 
@@ -33,16 +34,15 @@ namespace HumankindMods.Core
         public static RepairResult Repair(IReadOnlyList<string> configured, IEnumerable<string> installed)
         {
             var installedList = installed.ToList();
-            var installedSet = new HashSet<string>(installedList, StringComparer.OrdinalIgnoreCase);
+            var canonical = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var name in installedList) canonical[name] = name;
             var modules = new List<string>();
             var replaced = new List<string>();
             var dropped = new List<string>();
 
             foreach (var name in configured)
             {
-                var resolved = Installed(name, installedSet, installedList)
-                    ?? Installed(ShortName(name), installedSet, installedList)
-                    ?? NewestWithSameGuid(name, installedList);
+                var resolved = Installed(name, canonical) ?? Installed(ShortName(name), canonical) ?? NewestWithSameGuid(name, installedList);
                 if (resolved == null)
                 {
                     dropped.Add(name);
@@ -56,10 +56,8 @@ namespace HumankindMods.Core
             return new RepairResult(modules, replaced, dropped);
         }
 
-        private static string? Installed(string? name, HashSet<string> installedSet, List<string> installedList) =>
-            name != null && installedSet.Contains(name)
-                ? installedList.First(i => string.Equals(i, name, StringComparison.OrdinalIgnoreCase))
-                : null;
+        private static string? Installed(string? name, Dictionary<string, string> canonical) =>
+            name != null && canonical.TryGetValue(name, out var installedName) ? installedName : null;
 
         // The game registers most modules under the short name (RuntimeUtils.TrySplitRuntimeModuleName).
         private static string? ShortName(string name)
@@ -75,8 +73,8 @@ namespace HumankindMods.Core
             return installed
                 .Select(candidate => (candidate, match: VersionedName.Match(candidate)))
                 .Where(c => c.match.Success && string.Equals(c.match.Groups[1].Value, wanted.Groups[1].Value, StringComparison.OrdinalIgnoreCase))
-                .OrderByDescending(c => int.Parse(c.match.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture))
-                .ThenByDescending(c => int.Parse(c.match.Groups[3].Value, System.Globalization.CultureInfo.InvariantCulture))
+                .OrderByDescending(c => int.Parse(c.match.Groups[2].Value, CultureInfo.InvariantCulture))
+                .ThenByDescending(c => int.Parse(c.match.Groups[3].Value, CultureInfo.InvariantCulture))
                 .Select(c => c.candidate)
                 .FirstOrDefault();
         }

@@ -1,4 +1,3 @@
-using HumankindMods.Core;
 
 namespace HumankindMods.Core.Tests;
 
@@ -10,7 +9,7 @@ public class ReportFormatterTests
         var tracker = new DistrictSpawnTracker(stuckAfterSeconds: 60);
         tracker.OnRefresh(1, 0, true, false, column: 10, row: 20, now: 0);
         tracker.Sweep(now: 1, isAbleToSpawn: (_, _) => true);
-        tracker.OnSpawn(2, new[] { 0 }, written: 0, frame: 42);
+        tracker.OnSpawn(2, 0b1, written: 0, frame: 42);
 
         var report = ReportFormatter.Format(tracker, turn: 312, trackedComponents: 4200, maxRows: 200);
 
@@ -34,7 +33,7 @@ public class ReportFormatterTests
     public void Report_caps_the_district_rows()
     {
         var tracker = new DistrictSpawnTracker(60);
-        for (var id = 0; id < 5; id++) tracker.OnSpawn(id, new[] { 0 }, written: 0, frame: 1);
+        for (var id = 0; id < 5; id++) tracker.OnSpawn(id, 0b1, written: 0, frame: 1);
 
         var report = ReportFormatter.Format(tracker, turn: 1, trackedComponents: 5, maxRows: 2);
 

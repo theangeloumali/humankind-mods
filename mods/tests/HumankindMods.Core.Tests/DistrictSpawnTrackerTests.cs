@@ -1,4 +1,3 @@
-using HumankindMods.Core;
 
 namespace HumankindMods.Core.Tests;
 
@@ -81,7 +80,7 @@ public class DistrictSpawnTrackerTests
     {
         var tracker = NewTracker();
 
-        tracker.OnSpawn(District, expectedChannels: new[] { 0, 2 }, written: 1, frame: 100);
+        tracker.OnSpawn(District, dueChannelMask: 0b101, written: 1, frame: 100);
 
         Assert.Null(tracker.StateOf(District, 0));
         Assert.Equal(DistrictRenderState.ADropped, tracker.StateOf(District, 2));
@@ -91,9 +90,9 @@ public class DistrictSpawnTrackerTests
     public void Full_spawn_clears_a_previous_drop()
     {
         var tracker = NewTracker();
-        tracker.OnSpawn(District, new[] { 0 }, written: 0, frame: 100);
+        tracker.OnSpawn(District, 0b1, written: 0, frame: 100);
 
-        tracker.OnSpawn(District, new[] { 0 }, written: 1, frame: 101);
+        tracker.OnSpawn(District, 0b1, written: 1, frame: 101);
 
         Assert.Null(tracker.StateOf(District, 0));
     }
@@ -102,9 +101,9 @@ public class DistrictSpawnTrackerTests
     public void Drops_are_counted_per_frame_and_the_worst_frame_is_kept()
     {
         var tracker = NewTracker();
-        tracker.OnSpawn(1, new[] { 0 }, written: 0, frame: 100);
-        tracker.OnSpawn(2, new[] { 0 }, written: 0, frame: 101);
-        tracker.OnSpawn(3, new[] { 0 }, written: 0, frame: 101);
+        tracker.OnSpawn(1, 0b1, written: 0, frame: 100);
+        tracker.OnSpawn(2, 0b1, written: 0, frame: 101);
+        tracker.OnSpawn(3, 0b1, written: 0, frame: 101);
 
         var counts = tracker.GetCounts();
 
@@ -118,7 +117,7 @@ public class DistrictSpawnTrackerTests
     {
         var tracker = NewTracker();
         tracker.OnRefresh(District, 0, true, false, 3, 4, now: 0);
-        tracker.OnSpawn(District, new[] { 1 }, written: 0, frame: 1);
+        tracker.OnSpawn(District, 0b10, written: 0, frame: 1);
 
         tracker.OnUnload(District);
 
@@ -134,7 +133,7 @@ public class DistrictSpawnTrackerTests
         tracker.OnRefresh(2, 0, true, false, column: 11, row: 21, now: 0);
         tracker.OnRefresh(3, 0, true, false, column: 12, row: 22, now: 50);
         tracker.Sweep(now: 61, isAbleToSpawn: (id, _) => id == 1);
-        tracker.OnSpawn(4, new[] { 0 }, written: 0, frame: 9);
+        tracker.OnSpawn(4, 0b1, written: 0, frame: 9);
 
         var invisible = tracker.Invisible().OrderBy(d => d.ComponentId).ToList();
 

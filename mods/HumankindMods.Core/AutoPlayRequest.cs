@@ -14,7 +14,5 @@ namespace HumankindMods.Core
                 ? turn
                 : (int?)null;
         }
-
-        public static bool IsReached(int turn, int targetTurn) => turn >= targetTurn;
     }
 }

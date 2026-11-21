@@ -5,7 +5,6 @@ using System.Reflection;
 using Amplitude.Framework.Runtime;
 using Amplitude.Mercury.Runtime;
 using HarmonyLib;
-using HumankindMods.Core;
 using FrameworkRuntimeManager = Amplitude.Framework.Runtime.RuntimeManager;
 using MercuryRuntimeManager = Amplitude.Mercury.Runtime.RuntimeManager;
 
@@ -17,10 +16,8 @@ namespace ModListGuard
     {
         private static void Prefix(FrameworkRuntimeManager __instance, ref RuntimeModuleConfiguration[] configuration)
         {
-            var current = configuration;
-            RuntimeModuleConfiguration[]? repaired = null;
-            Plugin.Guard.Run("CheckRuntimeConfiguration.Prefix", () => repaired = Plugin.RepairIfSaved(__instance, current));
-            if (repaired != null) configuration = repaired;
+            configuration = Plugin.RepairHook.Run((__instance, configuration), static s => Plugin.RepairIfSaved(s.__instance, s.configuration), fallback: null)
+                ?? configuration;
         }
     }
 
@@ -36,31 +33,17 @@ namespace ModListGuard
 
         private static void Prefix(RuntimeModuleConfiguration[] configuration)
         {
-            Plugin.Guard.Run("SaveConfiguration.Prefix", () => Plugin.RecordIfLoss(Plugin.Join(configuration), Callers));
+            Plugin.SaveHook.Run(configuration, static c => Plugin.RecordIfLoss(Plugin.Join(c), Callers));
         }
 
         // The game methods on the stack name the path that saved (menu, mod.io, error reset).
         private static string Callers() =>
             string.Join(" < ", new StackTrace().GetFrames()
-                .Select(f => f.GetMethod())
-                .Where(m => m?.DeclaringType != null && !IsOurs(m.DeclaringType.Assembly))
-                .Select(m => GameMethodName(m!))
-                .Where(name => !name.StartsWith("HarmonyLib", StringComparison.Ordinal))
+                .Select(Harmony.GetMethodFromStackframe)
+                .Where(m => m?.DeclaringType != null && m.DeclaringType.Assembly != typeof(Plugin).Assembly && m.DeclaringType.Namespace != "HumankindMods.Core")
+                .Select(m => m!.DeclaringType!.Name + "." + m.Name)
                 .Distinct()
                 .Take(3));
-
-        private static bool IsOurs(Assembly assembly) =>
-            assembly == typeof(Plugin).Assembly || assembly == typeof(HookGuard).Assembly;
-
-        // Patched methods run as "DMD<Type::Method>" wrappers; keep only the method's own name.
-        private static string GameMethodName(MethodBase method)
-        {
-            var name = method.Name;
-            var start = name.LastIndexOf("::", StringComparison.Ordinal);
-            if (!name.StartsWith("DMD<", StringComparison.Ordinal) || start < 0) return method.DeclaringType!.Name + "." + name;
-            var inner = name.Substring(start + 2).TrimEnd('>');
-            return inner.Substring(inner.LastIndexOf('.') + 1);
-        }
     }
 
     [HarmonyPatch(typeof(MercuryRuntimeManager), "RuntimeExceptionRaised")]
@@ -68,7 +51,7 @@ namespace ModListGuard
     {
         private static void Prefix(RuntimeExceptionEventArgs e)
         {
-            Plugin.Guard.Run("RuntimeExceptionRaised.Prefix", () => Plugin.NoteCulprit(e.Exception));
+            Plugin.CulpritHook.Run(e.Exception, static exception => Plugin.NoteCulprit(exception));
         }
     }
 
@@ -77,7 +60,7 @@ namespace ModListGuard
     {
         private static void Prefix(Exception exception)
         {
-            Plugin.Guard.Run("HandleCrash.Prefix", () => Plugin.NoteCulprit(exception));
+            Plugin.CulpritHook.Run(exception, static e => Plugin.NoteCulprit(e));
         }
     }
 }
