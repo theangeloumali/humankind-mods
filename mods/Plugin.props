@@ -20,6 +20,7 @@
     <Reference Include="netstandard" HintPath="$(ManagedDir)/netstandard.dll" Private="false" />
     <Reference Include="Assembly-CSharp" HintPath="$(ManagedDir)/Assembly-CSharp.dll" Private="false" />
     <Reference Include="Assembly-CSharp-firstpass" HintPath="$(ManagedDir)/Assembly-CSharp-firstpass.dll" Private="false" />
+    <Reference Include="Amplitude" HintPath="$(ManagedDir)/Amplitude.dll" Private="false" />
     <Reference Include="Amplitude.Framework" HintPath="$(ManagedDir)/Amplitude.Framework.dll" Private="false" />
     <Reference Include="Amplitude.Graphics" HintPath="$(ManagedDir)/Amplitude.Graphics.dll" Private="false" />
     <Reference Include="Amplitude.Mercury" HintPath="$(ManagedDir)/Amplitude.Mercury.dll" Private="false" />

@@ -8,3 +8,4 @@ vendor/
 recordings/
 *.mp4
 *.webm
+.backup/
