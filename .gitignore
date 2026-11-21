@@ -1,0 +1,10 @@
+bin/
+obj/
+*.html
+*.dll
+*.pdb
+vendor/
+.vs/
+recordings/
+*.mp4
+*.webm
