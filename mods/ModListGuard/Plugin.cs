@@ -74,8 +74,9 @@ namespace ModListGuard
             if (!ModListHistory.IsLoss(oldList, newList)) return;
 
             var reason = ownReason ?? callers();
-            File.AppendAllText(historyPath, ModListHistory.ToJsonLine(DateTime.UtcNow, reason, culprit, oldList, newList) + "\n");
-            log.Write($"backed up mod list before it lost modules ({reason}): {oldList}");
+            var line = ModListHistory.ToJsonLine(DateTime.UtcNow, reason, culprit, oldList, newList);
+            if (ModListHistory.TryAppend(historyPath, line, log.Write))
+                log.Write($"backed up mod list before it lost modules ({reason}): {oldList}");
             culprit = null;
         }
 

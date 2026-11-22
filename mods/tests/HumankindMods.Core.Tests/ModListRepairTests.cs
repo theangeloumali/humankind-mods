@@ -30,6 +30,15 @@ public class ModListRepairTests
     }
 
     [Fact]
+    public void A_version_too_big_for_an_int_still_sorts_instead_of_throwing()
+    {
+        const string Huge = "deepsea reloaded.a76c474eb14d46cab94bde2e802b5ba8.99999999999.0";
+        var result = ModListRepair.Repair(new[] { Base, DeepSeaV19 }, new[] { Base, DeepSeaV33, Huge });
+
+        Assert.Equal(Huge, result.Modules[1]);
+    }
+
+    [Fact]
     public void The_highest_installed_version_wins_numerically()
     {
         var result = ModListRepair.Repair(new[] { Base, DeepSeaV19 }, new[] { Base, DeepSeaV210, DeepSeaV33 });

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Numerics;
 using System.Text.RegularExpressions;
 
 namespace HumankindMods.Core
@@ -59,6 +60,9 @@ namespace HumankindMods.Core
         private static string? Installed(string? name, Dictionary<string, string> canonical) =>
             name != null && canonical.TryGetValue(name, out var installedName) ? installedName : null;
 
+        /// <summary>One module however it's written: long or short name, any case.</summary>
+        public static string Identity(string name) => (ShortName(name) ?? name).ToLowerInvariant();
+
         // The game registers most modules under the short name (RuntimeUtils.TrySplitRuntimeModuleName).
         private static string? ShortName(string name)
         {
@@ -73,8 +77,9 @@ namespace HumankindMods.Core
             return installed
                 .Select(candidate => (candidate, match: VersionedName.Match(candidate)))
                 .Where(c => c.match.Success && string.Equals(c.match.Groups[1].Value, wanted.Groups[1].Value, StringComparison.OrdinalIgnoreCase))
-                .OrderByDescending(c => int.Parse(c.match.Groups[2].Value, CultureInfo.InvariantCulture))
-                .ThenByDescending(c => int.Parse(c.match.Groups[3].Value, CultureInfo.InvariantCulture))
+                // Mod authors pick the numbers, so they can exceed int; BigInteger never throws on digits.
+                .OrderByDescending(c => BigInteger.Parse(c.match.Groups[2].Value, CultureInfo.InvariantCulture))
+                .ThenByDescending(c => BigInteger.Parse(c.match.Groups[3].Value, CultureInfo.InvariantCulture))
                 .Select(c => c.candidate)
                 .FirstOrDefault();
         }

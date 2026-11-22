@@ -31,24 +31,57 @@ write_lock_owner() {
     "$GAME_LOCK_SESSION" "$$" $(( $(date +%s) + $1 * 60 )) > "$GAME_LOCK/owner.json"
 }
 
-# Takes the lock for <minutes>; a lock past its expiry whose holder pid is dead is taken over.
-acquire_game_lock() {
-  mkdir -p "$(dirname "$GAME_LOCK")"
-  if ! mkdir "$GAME_LOCK" 2>/dev/null; then
-    local owner expires pid
-    owner="$(cat "$GAME_LOCK/owner.json" 2>/dev/null)"
-    expires="$(printf '%s' "$owner" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("expires") or 0)' 2>/dev/null || echo 0)"
-    pid="$(printf '%s' "$owner" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("pid") or 0)' 2>/dev/null || echo 0)"
-    if [ "$expires" -gt "$(date +%s)" ] || { [ "$pid" -gt 0 ] && kill -0 "$pid" 2>/dev/null; }; then
-      echo "Game lock held: $owner" >&2
-      return 1
-    fi
-    echo "Taking over expired game lock: $owner" >&2
+# True while the lock's holder is live: not yet expired, or its pid still running. An unreadable
+# owner file counts as held for 10 minutes, so a failed read never hands over a live lock, while
+# one a crash left half-written still frees up.
+lock_is_held() {
+  local fields expires pid
+  if ! fields="$(python3 -c 'import json,sys; o=json.load(open(sys.argv[1])); print(int(o.get("expires") or 0), int(o.get("pid") or 0))' \
+    "$GAME_LOCK/owner.json" 2>/dev/null)"; then
+    [ -n "$(find "$GAME_LOCK" -maxdepth 1 -mmin -10 -print -quit 2>/dev/null)" ]
+    return
   fi
+  read -r expires pid <<<"$fields"
+  [ "$expires" -gt "$(date +%s)" ] || { [ "$pid" -gt 0 ] && kill -0 "$pid" 2>/dev/null; }
+}
+
+# mkdir is not atomic in the sandbox these scripts run in (49 of 50 races had two winners), so
+# every check-then-write on the lock runs under a kernel flock on a file beside it.
+with_lock_mutex() {
+  mkdir -p "$(dirname "$GAME_LOCK")"
+  (
+    flock -w 10 9 || { echo "Couldn't get the game-lock mutex" >&2; exit 2; }
+    "$@"
+  ) 9>"$GAME_LOCK.mutex"
+}
+
+take_lock_unguarded() {
+  if [ -d "$GAME_LOCK" ] && lock_is_held; then
+    echo "Game lock held: $(cat "$GAME_LOCK/owner.json" 2>/dev/null)" >&2
+    return 1
+  fi
+  [ -d "$GAME_LOCK" ] && echo "Taking over expired game lock: $(cat "$GAME_LOCK/owner.json" 2>/dev/null)" >&2
+  mkdir -p "$GAME_LOCK"
   write_lock_owner "$1"
 }
 
-renew_game_lock() { [ -d "$GAME_LOCK" ] && write_lock_owner "$1"; }
+renew_lock_unguarded() {
+  if [ ! -d "$GAME_LOCK" ] || grep -q "\"session\":\"$GAME_LOCK_SESSION\"" "$GAME_LOCK/owner.json" 2>/dev/null; then
+    mkdir -p "$GAME_LOCK"
+    write_lock_owner "$1"
+  else
+    echo "Game lock is now held by another session; not renewing it" >&2
+  fi
+}
+
+# Takes the lock for <minutes>; a lock past its expiry whose holder pid is dead is taken over.
+acquire_game_lock() { with_lock_mutex take_lock_unguarded "$1"; }
+
+# Never fails the caller: a run in progress must not stop because the lock moved.
+renew_game_lock() {
+  with_lock_mutex renew_lock_unguarded "$1"
+  return 0
+}
 
 release_game_lock() {
   grep -q "\"session\":\"$GAME_LOCK_SESSION\"" "$GAME_LOCK/owner.json" 2>/dev/null && rm -rf "$GAME_LOCK"

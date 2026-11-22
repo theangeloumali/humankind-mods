@@ -31,10 +31,29 @@ namespace HumankindMods.Core
 
         public static string Join(IEnumerable<string> modules) => string.Join("/", modules);
 
+        /// <summary>
+        /// A write error is logged, not thrown: the caller runs inside a hook that switches itself
+        /// off after one exception, which would end every later backup this session.
+        /// </summary>
+        public static bool TryAppend(string path, string line, Action<string> log)
+        {
+            try
+            {
+                File.AppendAllText(path, line + "\n");
+                return true;
+            }
+            catch (Exception error) when (error is IOException || error is UnauthorizedAccessException)
+            {
+                log($"couldn't write the mod list backup to {path}: {error.Message}");
+                return false;
+            }
+        }
+
         public static bool IsLoss(string? oldList, string? newList)
         {
-            var kept = new HashSet<string>(Split(newList));
-            return Split(oldList).Any(module => !kept.Contains(module));
+            // A repair that only swaps a long name for the short one keeps the module.
+            var kept = new HashSet<string>(Split(newList).Select(ModListRepair.Identity));
+            return Split(oldList).Any(module => !kept.Contains(ModListRepair.Identity(module)));
         }
 
         public static string ToJsonLine(DateTime utc, string reason, string? culprit, string oldList, string newList)

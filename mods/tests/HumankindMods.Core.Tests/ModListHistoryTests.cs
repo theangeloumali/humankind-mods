@@ -27,6 +27,38 @@ public class ModListHistoryTests
     }
 
     [Fact]
+    public void Renaming_a_module_to_its_short_name_is_not_a_loss()
+    {
+        const string Long = "deepsea reloaded.a76c474eb14d46cab94bde2e802b5ba8.1.9";
+        Assert.False(ModListHistory.IsLoss("project mercury/" + Long, "project mercury/deepsea reloaded"));
+        Assert.False(ModListHistory.IsLoss("project mercury/Deepsea Reloaded", "project mercury/" + Long));
+    }
+
+    [Fact]
+    public void A_failed_history_write_is_logged_instead_of_thrown()
+    {
+        var dir = Directory.CreateTempSubdirectory().FullName;
+        var logged = new List<string>();
+
+        var written = ModListHistory.TryAppend(dir, "{}", logged.Add);
+
+        Assert.False(written);
+        Assert.Single(logged);
+        Directory.Delete(dir);
+    }
+
+    [Fact]
+    public void A_history_line_is_appended()
+    {
+        var path = Path.Combine(Directory.CreateTempSubdirectory().FullName, "history.jsonl");
+
+        Assert.True(ModListHistory.TryAppend(path, "{\"a\":1}", _ => { }));
+        Assert.True(ModListHistory.TryAppend(path, "{\"a\":2}", _ => { }));
+
+        Assert.Equal(new[] { "{\"a\":1}", "{\"a\":2}" }, File.ReadAllLines(path));
+    }
+
+    [Fact]
     public void Removing_one_mod_is_a_loss()
     {
         Assert.True(ModListHistory.IsLoss("project mercury/a/b", "project mercury/b"));
