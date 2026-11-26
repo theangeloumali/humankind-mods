@@ -24,6 +24,13 @@ namespace CityRedraw.Diagnostics
             }
 
             var (art, component) = stops[next];
+            // Unity's == is true for a destroyed object (a district razed since the list was built): skip it.
+            if (component == null)
+            {
+                next++;
+                return;
+            }
+
             var tile = component.WorldPosition;
             // Left third of the screen: turn popups and notifications cover the centre and right.
             Presentation.PresentationCameraController.FocusCameraAt(tile, new Vector2(0.25f, 0.45f), 0.05f);
