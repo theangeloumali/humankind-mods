@@ -26,6 +26,7 @@ namespace HumankindAutoPlay
         private int? targetTurn;
         private bool active;
         private int lastTurn = -1;
+        private float nextRequestCheck;
         private float lastTurnAt;
         private ControlledByHumanBinding savedBinding;
         private EmpireReadyOrderPolicy savedPolicy;
@@ -48,6 +49,16 @@ namespace HumankindAutoPlay
         private void Update()
         {
             if (targetTurn.HasValue) updateHook.Run(updateBody);
+            else if (Time.realtimeSinceStartup >= nextRequestCheck) ReadRequestIfNew();
+        }
+
+        // A request written while the game runs arms autoplay too, e.g. after loading another save in game.
+        private void ReadRequestIfNew()
+        {
+            nextRequestCheck = Time.realtimeSinceStartup + 3f;
+            if (!File.Exists(requestPath)) return;
+            targetTurn = AutoPlayRequest.ParseTargetTurn(File.ReadAllText(requestPath));
+            if (targetTurn.HasValue) log.Write("armed in game, target turn " + targetTurn);
         }
 
         private void UpdateBody()

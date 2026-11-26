@@ -13,8 +13,8 @@ namespace CityRedraw.Diagnostics
     /// exceptions with their stack. Three guards change the game: a throwing map handler no longer stops the
     /// ones after it (PresentationSnapshotPatch), the independents' army upgrade survives a rung no technology
     /// unlocks (MinorFactionUpgradeGuard), an army with a zero speed stops instead of breaking the turn
-    /// (ArmyMoveGuard). Near the FX layer limit (960; past it buildings stop drawing) it warns on screen, and its
-    /// quick-reload key restores them (QuickReload). It must never hook the spawn path: patching
+    /// (ArmyMoveGuard). Near the FX layer limit (960; past it buildings stop drawing) it warns on screen and, at a new turn,
+    /// quick-saves and reloads (QuickReload), which rebuilds the layer list. It must never hook the spawn path: patching
     /// PresentationLevelBuildComponent.RefreshChannel stopped every building drawing.</summary>
     [BepInPlugin(PluginGuid, "CityRedraw Diagnostics", "0.2.0")]
     public sealed class Plugin : BaseUnityPlugin
@@ -28,6 +28,11 @@ namespace CityRedraw.Diagnostics
         private ConfigEntry<KeyboardShortcut> layerFillKey = null!;
         private ConfigEntry<KeyboardShortcut> reloadKey = null!;
         private ConfigEntry<int> warnAt = null!;
+        private ConfigEntry<int> autoReloadAt = null!;
+        private ConfigEntry<KeyboardShortcut> loadSaveKey = null!;
+        private ConfigEntry<string> loadSaveTitle = null!;
+        private int layersAfterLoad = -1;
+        private int lastLayers;
         private GuardedHook guiHook = null!;
         private Action guiBody = null!;
         private GUIStyle? bannerStyle;
@@ -60,6 +65,10 @@ namespace CityRedraw.Diagnostics
             reloadKey = Config.Bind("LayerLimit", "QuickReloadKey", new KeyboardShortcut(KeyCode.F8, KeyCode.LeftControl),
                 "Quick-saves and loads that save, which brings back buildings lost to the FX layer limit.");
             warnAt = Config.Bind("LayerLimit", "WarnAtLayers", 940, "Shows the on-screen warning from this many FX layers (the renderer draws 960).");
+            autoReloadAt = Config.Bind("LayerLimit", "AutoReloadAtLayers", 945,
+                "At a new turn with this many FX layers, quick-saves and reloads so buildings keep drawing. 0 turns it off.");
+            loadSaveKey = Config.Bind("Diagnostics", "LoadSaveKey", new KeyboardShortcut(KeyCode.F7, KeyCode.LeftControl), "Loads the save named in LoadSaveTitle.");
+            loadSaveTitle = Config.Bind("Diagnostics", "LoadSaveTitle", "", "Save the load key opens, e.g. 'auto-save 917'. Empty: the key does nothing.");
             tourKey = Config.Bind("Diagnostics", "CameraTourKey", new KeyboardShortcut(KeyCode.F11, KeyCode.LeftControl), "Focuses the camera on the next district or construction site.");
             layerFillKey = Config.Bind("Diagnostics", "LayerFillKey", new KeyboardShortcut(KeyCode.F9, KeyCode.LeftControl),
                 "Adds empty FX layers up to LayerFillTarget, to reproduce the late-game layer overflow.");
@@ -105,6 +114,7 @@ namespace CityRedraw.Diagnostics
             if (tourKey.Value.IsDown()) tour.Advance();
             if (layerFillKey.Value.IsDown()) FxLayerFill.FillTo(layerFillTarget.Value);
             if (reloadKey.Value.IsDown()) QuickReload.Start();
+            if (loadSaveKey.Value.IsDown() && loadSaveTitle.Value.Length > 0) QuickReload.LoadSave(loadSaveTitle.Value);
             var turn = PluginSupport.CurrentTurn();
             if (!contractsWritten && turn >= 0 && EntityContractDump.TryWrite(Path.Combine(outputDir, "entity-contracts.json")))
             {
@@ -114,10 +124,22 @@ namespace CityRedraw.Diagnostics
 
             if (turn == lastTurn || turn < 0) return;
             lastTurn = turn;
+            ReloadIfLayersNearLimit();
             log.Write($"turn {turn}: particle budget: {ParticleBudgetProbe.TakeSummary()}");
             if (MissingArt.Occurrences == lastMissingArt) return;
             log.Write($"turn {turn}: art lookups with no art {MissingArt.Occurrences}, distinct {MissingArt.DistinctSeen}");
             lastMissingArt = MissingArt.Occurrences;
+        }
+
+        // A load rebuilds the renderer, so a drop in the layer count marks a new baseline.
+        private void ReloadIfLayersNearLimit()
+        {
+            var layers = ParticleBudgetProbe.CurrentLayers;
+            if (layersAfterLoad < 0 || layers < lastLayers) layersAfterLoad = layers;
+            lastLayers = layers;
+            if (!AutoReloadPolicy.ShouldReload(layers, autoReloadAt.Value, layersAfterLoad, minGrowth: 20)) return;
+            log.Write($"auto reload: {layers} FX layers (after load {layersAfterLoad}, limit {ParticleBudgetProbe.LayersThatFit})");
+            QuickReload.Start();
         }
 
         private void WriteReport()

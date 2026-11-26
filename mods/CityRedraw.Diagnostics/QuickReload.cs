@@ -11,6 +11,24 @@ namespace CityRedraw.Diagnostics
         private static readonly Type? ServiceType = AccessTools.TypeByName("Amplitude.Mercury.Game.IGameSerializationService");
         private static bool saving;
 
+        /// <summary>Loads a save by title the way LoadLatestSave does (a state change to the out-game runtime state).</summary>
+        internal static void LoadSave(string title)
+        {
+            var service = ServiceType == null ? null : Services.GetService(ServiceType);
+            var descriptor = service == null ? null
+                : AccessTools.Method(ServiceType, "RetrieveGameSaveDescriptorFromSave", new[] { typeof(string) }).Invoke(service, new object[] { title });
+            if (descriptor == null)
+            {
+                Plugin.Log($"load save: '{title}' not found");
+                return;
+            }
+
+            var outGame = AccessTools.TypeByName("Amplitude.Mercury.Runtime.RuntimeState_OutGame");
+            Plugin.Log($"load save: loading '{title}'");
+            Services.GetService<Amplitude.Framework.Runtime.IRuntimeService>().Runtime.FiniteStateMachine
+                .PostStateChange(outGame, Activator.CreateInstance(AccessTools.TypeByName("Amplitude.Mercury.Runtime.RuntimeStateGameSaveDescriptorParameter"), descriptor));
+        }
+
         internal static void Start()
         {
             if (saving) return;
