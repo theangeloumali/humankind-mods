@@ -1,7 +1,5 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
-using Amplitude.Mercury.Presentation;
 using BepInEx;
 using BepInEx.Configuration;
 using HumankindMods.Core;
@@ -10,53 +8,38 @@ using UnityEngine;
 
 namespace CityRedraw.Diagnostics
 {
-    /// <summary>Read-only: logs districts whose model was retired and never respawned. Changes nothing in the game.</summary>
-    [BepInPlugin(PluginGuid, "CityRedraw Diagnostics", "0.1.0")]
+    /// <summary>Logs map-drawing failures (art lookups that find nothing, a district census on demand) and keeps a
+    /// throwing map handler from stopping the ones after it (PresentationSnapshotPatch). It must never hook the
+    /// spawn path: patching PresentationLevelBuildComponent.RefreshChannel stopped every building drawing.</summary>
+    [BepInPlugin(PluginGuid, "CityRedraw Diagnostics", "0.2.0")]
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string PluginGuid = "com.zkidz.humankind.cityredraw.diagnostics";
-        private const int ReportEveryTurns = 10;
-        private const int ReportRows = 200;
-        private const double StuckAfterSeconds = 60;
-
-        private static readonly Dictionary<int, PresentationLevelBuildComponent> Components = new Dictionary<int, PresentationLevelBuildComponent>();
-        private static readonly List<int> Destroyed = new List<int>();
-        private static readonly Func<int, int, bool> IsAbleToSpawn = static (id, channel) =>
-            Components.TryGetValue(id, out var component) && GameStateReader.IsAbleToSpawn(component, channel);
 
         private static LineLog log = null!;
 
         private ConfigEntry<KeyboardShortcut> reportKey = null!;
-        private ConfigEntry<float> sweepSeconds = null!;
+        private ConfigEntry<KeyboardShortcut> tourKey = null!;
+        private readonly CameraTour tour = new CameraTour();
         private GuardedHook updateHook = null!;
         private Action updateBody = null!;
         private string outputDir = "";
         private bool active;
-        private float nextSweep;
         private int lastTurn = -1;
-        private int? lastReportTurn;
-        private SpawnCounts lastCounts;
+        private int lastMissingArt;
 
-        internal static DistrictSpawnTracker Tracker { get; } = new DistrictSpawnTracker(StuckAfterSeconds);
-        internal static GuardedHook SpawnPrefixHook { get; } = NewHook("AddParticle.Prefix");
-        internal static GuardedHook SpawnPostfixHook { get; } = NewHook("AddParticle.Postfix");
-        internal static GuardedHook RefreshHook { get; } = NewHook("RefreshChannel.Postfix");
-        internal static GuardedHook UnloadHook { get; } = NewHook("Unload.Postfix");
+        internal static GuardedHook NarrativeHook { get; } = NewHook("Narrative.Prefix");
+        internal static GuardedHook MissingArtHook { get; } = NewHook("MissingArt.Postfix");
+        internal static DistinctReporter MissingArt { get; } = new DistinctReporter(300);
 
-        internal static void Remember(PresentationLevelBuildComponent component) => Components[component.GetInstanceID()] = component;
-
-        internal static void Forget(int componentId)
-        {
-            Components.Remove(componentId);
-            Tracker.OnUnload(componentId);
-        }
+        internal static void Log(string message) => log.Write(message);
 
         private static GuardedHook NewHook(string name) => new GuardedHook(name, static message => log.Write(message));
 
         private void Awake()
         {
-            reportKey = Config.Bind("Diagnostics", "ReportKey", new KeyboardShortcut(KeyCode.F10, KeyCode.LeftControl), "Writes a report now.");
-            sweepSeconds = Config.Bind("Diagnostics", "SweepSeconds", 5f, "How often waiting districts are re-checked.");
+            reportKey = Config.Bind("Diagnostics", "ReportKey", new KeyboardShortcut(KeyCode.F10, KeyCode.LeftControl), "Writes the district census now.");
+            tourKey = Config.Bind("Diagnostics", "CameraTourKey", new KeyboardShortcut(KeyCode.F11, KeyCode.LeftControl), "Focuses the camera on the next district or construction site.");
             outputDir = Path.Combine(Paths.BepInExRootPath, "CityRedraw");
             log = new LineLog(Path.Combine(outputDir, "diagnostics.log"));
             updateHook = NewHook("Plugin.Update");
@@ -71,50 +54,24 @@ namespace CityRedraw.Diagnostics
 
         private void UpdateBody()
         {
-            if (reportKey.Value.IsDown()) WriteReport("hotkey");
-            if (Time.realtimeSinceStartup >= nextSweep)
-            {
-                nextSweep = Time.realtimeSinceStartup + sweepSeconds.Value;
-                Sweep();
-            }
-
+            if (reportKey.Value.IsDown()) WriteReport();
+            if (tourKey.Value.IsDown()) tour.Advance();
             var turn = PluginSupport.CurrentTurn();
-            if (turn != lastTurn && turn >= 0) OnNewTurn(turn);
-        }
-
-        private static void Sweep()
-        {
-            Destroyed.Clear();
-            foreach (var pair in Components)
-            {
-                if (pair.Value == null) Destroyed.Add(pair.Key);
-            }
-
-            foreach (var id in Destroyed) Forget(id);
-            Tracker.Sweep(Time.realtimeSinceStartup, IsAbleToSpawn);
-        }
-
-        private void OnNewTurn(int turn)
-        {
+            if (turn == lastTurn || turn < 0) return;
             lastTurn = turn;
-            var counts = Tracker.GetCounts();
-            if (!counts.Equals(lastCounts))
-            {
-                log.Write($"turn {turn}: components {Components.Count}, B-pending {counts.BPending}, B-orphaned {counts.BOrphaned}, " +
-                          $"B-stuck {counts.BStuck}, A-dropped {counts.ADropped}, drops {counts.TotalDrops}");
-                lastCounts = counts;
-            }
-
-            if (counts.Invisible > 0 && (lastReportTurn == null || turn - lastReportTurn >= ReportEveryTurns)) WriteReport("auto");
+            if (MissingArt.Occurrences == lastMissingArt) return;
+            log.Write($"turn {turn}: art lookups with no art {MissingArt.Occurrences}, distinct {MissingArt.DistinctSeen}");
+            lastMissingArt = MissingArt.Occurrences;
         }
 
-        private void WriteReport(string trigger)
+        private void WriteReport()
         {
             var turn = PluginSupport.CurrentTurn();
-            lastReportTurn = turn;
             var path = Path.Combine(outputDir, $"report-turn{turn}-{DateTime.Now:yyyyMMdd-HHmmss}.txt");
-            File.WriteAllText(path, ReportFormatter.Format(Tracker, turn, Components.Count, ReportRows));
-            log.Write($"report ({trigger}) written: {path}");
+            var (expected, underConstruction) = DistrictCensusReader.Expected();
+            var census = DistrictCensus.Format(DistrictCensusReader.Read(), expected, underConstruction);
+            File.WriteAllText(path, $"CityRedraw district census, turn {turn}{Environment.NewLine}{census}");
+            log.Write($"report written: {path}; {census.Split('\n')[0].Trim()}");
         }
     }
 }

@@ -28,6 +28,7 @@
     <Reference Include="Amplitude.Mercury.Data" HintPath="$(ManagedDir)/Amplitude.Mercury.Data.dll" Private="false" />
     <Reference Include="Amplitude.Mercury.Firstpass" HintPath="$(ManagedDir)/Amplitude.Mercury.Firstpass.dll" Private="false" />
     <Reference Include="Amplitude.Mercury.Fx" HintPath="$(ManagedDir)/Amplitude.Mercury.Fx.dll" Private="false" />
+    <Reference Include="Amplitude.Mercury.Terrain" HintPath="$(ManagedDir)/Amplitude.Mercury.Terrain.dll" Private="false" />
   </ItemGroup>
   <!-- dotnet build -p:Deploy=true copies each plugin and Core into the game's plugin folder. -->
   <Target Name="DeployToGame" AfterTargets="Build" Condition="'$(Deploy)' == 'true'">
