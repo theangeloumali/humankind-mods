@@ -85,8 +85,8 @@ namespace HumankindAutoPlay
             if (turn < targetTurn) return;
 
             File.WriteAllText(donePath, "turn " + turn + " at " + DateTime.Now.ToString("o"));
+            // No Application.Quit: its shutdown stalls (EmpireBanner.OnPresentationShuttingDown throws) and hangs the game.
             Stop("target turn reached");
-            UnityEngine.Application.Quit();
         }
 
         // Deleting the request keeps a relaunch from resuming a run that was finished or cancelled.
