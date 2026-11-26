@@ -8,9 +8,11 @@ using UnityEngine;
 
 namespace CityRedraw.Diagnostics
 {
-    /// <summary>Logs map-drawing failures (art lookups that find nothing, a district census on demand) and keeps a
-    /// throwing map handler from stopping the ones after it (PresentationSnapshotPatch). It must never hook the
-    /// spawn path: patching PresentationLevelBuildComponent.RefreshChannel stopped every building drawing.</summary>
+    /// <summary>Logs map-drawing failures (art lookups that find nothing, a district census on demand) and sandbox
+    /// exceptions with their stack. Two guards change the game: a throwing map handler no longer stops the ones
+    /// after it (PresentationSnapshotPatch), and the independents' army upgrade survives a rung no technology
+    /// unlocks (MinorFactionUpgradeGuard). It must never hook the spawn path: patching
+    /// PresentationLevelBuildComponent.RefreshChannel stopped every building drawing.</summary>
     [BepInPlugin(PluginGuid, "CityRedraw Diagnostics", "0.2.0")]
     public sealed class Plugin : BaseUnityPlugin
     {
@@ -27,10 +29,12 @@ namespace CityRedraw.Diagnostics
         private bool active;
         private int lastTurn = -1;
         private int lastMissingArt;
+        private bool contractsWritten;
 
         internal static GuardedHook NarrativeHook { get; } = NewHook("Narrative.Prefix");
         internal static GuardedHook MissingArtHook { get; } = NewHook("MissingArt.Postfix");
         internal static DistinctReporter MissingArt { get; } = new DistinctReporter(300);
+        internal static DistinctReporter UpgradeStops { get; } = new DistinctReporter(50);
 
         internal static void Log(string message) => log.Write(message);
 
@@ -57,6 +61,12 @@ namespace CityRedraw.Diagnostics
             if (reportKey.Value.IsDown()) WriteReport();
             if (tourKey.Value.IsDown()) tour.Advance();
             var turn = PluginSupport.CurrentTurn();
+            if (!contractsWritten && turn >= 0 && EntityContractDump.TryWrite(Path.Combine(outputDir, "entity-contracts.json")))
+            {
+                contractsWritten = true;
+                log.Write("entity contracts written");
+            }
+
             if (turn == lastTurn || turn < 0) return;
             lastTurn = turn;
             if (MissingArt.Occurrences == lastMissingArt) return;
