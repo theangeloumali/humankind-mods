@@ -1,6 +1,6 @@
 """The bundle-tool venv caps each Python process's memory, so a runaway UnityPy scan fails with
 MemoryError instead of exhausting WSL (2026-11-25: an 8.5 GB scan got the whole distro killed).
-Run: python3 -m pytest mod-tests/tests"""
+Run: mod-tests/.venv/bin/python -m unittest discover mod-tests/tests"""
 import os
 import subprocess
 import unittest
@@ -15,8 +15,11 @@ def allocate(gigabytes, cap_gigabytes):
     return subprocess.run([VENV_PYTHON, "-c", script], env=env, capture_output=True, text=True, timeout=120)
 
 
-@unittest.skipUnless(os.path.exists(VENV_PYTHON), "run mod-tests/tools/setup.sh first")
 class MemoryCapTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        assert os.path.exists(VENV_PYTHON), "no venv: run mod-tests/tools/setup.sh first"
+
     def test_allocation_past_the_cap_raises_memory_error(self):
         result = allocate(gigabytes=2, cap_gigabytes=1)
         self.assertNotEqual(result.returncode, 0)
