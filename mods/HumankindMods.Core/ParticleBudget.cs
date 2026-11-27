@@ -16,7 +16,7 @@ namespace HumankindMods.Core
 
         private readonly Dictionary<string, LayerPeak> layers = new Dictionary<string, LayerPeak>();
         private readonly List<string> added = new List<string>();
-        private int textureUsedPixels, textureTotalPixels, cpuDrops, rendererLayers, layersThatFit;
+        private int textureUsedPixels, textureTotalPixels, cpuDrops, rendererLayers, layersThatFit, poolUsed, poolCapacity;
 
         public bool HasData => layers.Count > 0 || cpuDrops > 0 || textureTotalPixels > 0 || rendererLayers > 0;
 
@@ -43,6 +43,13 @@ namespace HumankindMods.Core
 
         public void RecordCpuDrop() => cpuDrops++;
 
+        /// <summary>The GPU particle pool every live building sits in; a session that fills it drops new ones.</summary>
+        public void RecordParticlePool(int used, int capacity)
+        {
+            poolUsed = Math.Max(poolUsed, used);
+            poolCapacity = capacity;
+        }
+
         /// <summary>A layer the renderer appended (it never removes one), to see what a long session accumulates.</summary>
         public void RecordLayerAdded(string name) => added.Add(name);
 
@@ -56,7 +63,7 @@ namespace HumankindMods.Core
         {
             layers.Clear();
             added.Clear();
-            textureUsedPixels = textureTotalPixels = cpuDrops = rendererLayers = layersThatFit = 0;
+            textureUsedPixels = textureTotalPixels = cpuDrops = rendererLayers = layersThatFit = poolUsed = poolCapacity = 0;
         }
 
         public string Summary(int maxLayers, int maxAdded = 12)
@@ -66,6 +73,7 @@ namespace HumankindMods.Core
             var text = new StringBuilder()
                 .Append($"renderer layers {rendererLayers}/{layersThatFit}{over}; ")
                 .Append($"texture {percent}% ({textureUsedPixels}/{textureTotalPixels} px); cpu drops {cpuDrops}; ")
+                .Append($"pool {(poolCapacity > 0 ? 100L * poolUsed / poolCapacity : 0)}% ({poolUsed}/{poolCapacity}); ")
                 .Append($"added {added.Count}");
             if (added.Count > 0) text.Append(": ").Append(string.Join(", ", added.Take(maxAdded)));
             if (added.Count > maxAdded) text.Append($", +{added.Count - maxAdded} more");

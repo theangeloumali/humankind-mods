@@ -57,8 +57,21 @@ namespace CityRedraw.Diagnostics
                     var content = counters?.ReadContent;
                     if (content == null || slot >= content.Length) return;
                     var rendered = content[slot] / Math.Max(1, layer.VisualParticlePixelCount);
+                    if (index == 0) RecordPool(content);
                     Budget.RecordLayer(layer.Name, rendered, layer.AllocatedParticleCount, Requested(layer), UpperBound(layer));
                 });
+        }
+
+        private static FxComponentEvolve? evolve;
+
+        // Slot 0 restarts at NewParticleBufferSize each frame and the GPU counts each particle kept in the pool
+        // (decompiled FxComponentEvolve:251-258, 308), so its readback is the pool's fill.
+        private static void RecordPool(int[] content)
+        {
+            if (evolve == null) evolve = UnityEngine.Object.FindObjectOfType<FxComponentEvolve>();
+            var settings = evolve == null ? null : evolve.Settings;
+            if (settings == null || content.Length <= FxComponentEvolve.GlobalAllocatorIndexParticle) return;
+            Budget.RecordParticlePool(content[FxComponentEvolve.GlobalAllocatorIndexParticle], settings.ParticleBufferSize);
         }
 
         [HarmonyPatch(typeof(FxComponentRenderer), "AllocAllOutputLayers")]

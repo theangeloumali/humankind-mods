@@ -13,7 +13,8 @@ namespace CityRedraw.Diagnostics
     /// exceptions with their stack. Three guards change the game: a throwing map handler no longer stops the
     /// ones after it (PresentationSnapshotPatch), the independents' army upgrade survives a rung no technology
     /// unlocks (MinorFactionUpgradeGuard), an army with a zero speed stops instead of breaking the turn
-    /// (ArmyMoveGuard). Near the FX layer limit (960; past it buildings stop drawing) it warns on screen and, at a new turn,
+    /// (ArmyMoveGuard), and the GPU particle pool is created large enough that late-game buildings are not dropped
+    /// (ParticlePoolGuard). Near the FX layer limit (960; past it buildings stop drawing) it warns on screen and, at a new turn,
     /// quick-saves and reloads (QuickReload), which rebuilds the layer list. It must never hook the spawn path: patching
     /// PresentationLevelBuildComponent.RefreshChannel stopped every building drawing.</summary>
     [BepInPlugin(PluginGuid, "CityRedraw Diagnostics", "0.2.0")]
@@ -31,6 +32,9 @@ namespace CityRedraw.Diagnostics
         private ConfigEntry<int> autoReloadAt = null!;
         private ConfigEntry<KeyboardShortcut> loadSaveKey = null!;
         private ConfigEntry<string> loadSaveTitle = null!;
+        private ConfigEntry<bool> autoLoadSave = null!;
+        private bool autoLoadDone;
+        private float autoLoadAt = -1f;
         private ConfigEntry<int> shotEveryTurns = null!;
         private int layersAfterLoad = -1;
         private int lastLayers;
@@ -54,6 +58,9 @@ namespace CityRedraw.Diagnostics
         internal static GuardedHook ParticleBudgetHook { get; } = NewHook("ParticleBudget");
         internal static GuardedHook QuickReloadHook { get; } = NewHook("QuickReload");
         internal static GuardedHook CameraSequenceHook { get; } = NewHook("CameraSequence.Postfix");
+        internal static GuardedHook ParticlePoolHook { get; } = NewHook("ParticlePool.Prefix");
+        internal static int ParticlePoolSize { get; private set; }
+        internal static int ParticlePoolTestSize { get; private set; }
         internal static DistinctReporter MissingArt { get; } = new DistinctReporter(300);
         internal static DistinctReporter UpgradeStops { get; } = new DistinctReporter(50);
         internal static DistinctReporter ZeroSpeedArmies { get; } = new DistinctReporter(50);
@@ -65,6 +72,10 @@ namespace CityRedraw.Diagnostics
         private void Awake()
         {
             reportKey = Config.Bind("Diagnostics", "ReportKey", new KeyboardShortcut(KeyCode.F10, KeyCode.LeftControl), "Writes the district census now.");
+            ParticlePoolSize = Config.Bind("Fixes", "ParticlePoolSize", 33554432,
+                "GPU particle pool size in uints (game: 16777216). Late modded games overflow the game's size and lose buildings; 0 keeps it.").Value;
+            ParticlePoolTestSize = Config.Bind("Diagnostics", "ParticlePoolTestSize", 0,
+                "Sets the particle pool to exactly this size, smaller included, to reproduce the overflow. 0 = off.").Value;
             reloadKey = Config.Bind("LayerLimit", "QuickReloadKey", new KeyboardShortcut(KeyCode.F8, KeyCode.LeftControl),
                 "Quick-saves and loads that save, which brings back buildings lost to the FX layer limit.");
             warnAt = Config.Bind("LayerLimit", "WarnAtLayers", 940, "Shows the on-screen warning from this many FX layers (the renderer draws 960).");
@@ -73,6 +84,8 @@ namespace CityRedraw.Diagnostics
             loadSaveKey = Config.Bind("Diagnostics", "LoadSaveKey", new KeyboardShortcut(KeyCode.F7, KeyCode.LeftControl), "Loads the save named in LoadSaveTitle.");
             shotEveryTurns = Config.Bind("Diagnostics", "ScreenshotEveryTurns", 0,
                 "Saves the game's own frame (works behind a locked desktop) to CityRedraw/shots every N turns. 0 = off.");
+            autoLoadSave = Config.Bind("Diagnostics", "AutoLoadSaveOnce", false,
+                "Once per launch, on the first in-game turn, loads LoadSaveTitle (unattended A/B runs from one save).");
             loadSaveTitle = Config.Bind("Diagnostics", "LoadSaveTitle", "", "Save the load key opens, e.g. 'auto-save 917'. Empty: the key does nothing.");
             tourKey = Config.Bind("Diagnostics", "CameraTourKey", new KeyboardShortcut(KeyCode.F11, KeyCode.LeftControl), "Focuses the camera on the next district or construction site.");
             layerFillKey = Config.Bind("Diagnostics", "LayerFillKey", new KeyboardShortcut(KeyCode.F9, KeyCode.LeftControl),
@@ -126,6 +139,16 @@ namespace CityRedraw.Diagnostics
             {
                 contractsWritten = true;
                 log.Write("entity contracts written");
+            }
+
+            // Loading while the first game is still starting cancels its start (Game.DoStart throws), so wait.
+            if (!autoLoadDone && autoLoadSave.Value && loadSaveTitle.Value.Length > 0 && turn >= 0 && Amplitude.Mercury.Presentation.Presentation.HasBeenStarted)
+            {
+                if (autoLoadAt < 0f) autoLoadAt = Time.realtimeSinceStartup + 10f;
+                if (Time.realtimeSinceStartup < autoLoadAt) return;
+                autoLoadDone = true;
+                QuickReload.LoadSave(loadSaveTitle.Value);
+                return;
             }
 
             if (turn == lastTurn || turn < 0) return;

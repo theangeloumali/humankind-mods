@@ -108,4 +108,15 @@ public class ParticleBudgetTests
 
         Assert.Contains("added 0", budget.Summary(maxLayers: 5, maxAdded: 2));
     }
+
+    [Fact]
+    public void Reports_the_peak_particle_pool_fill()
+    {
+        var budget = new ParticleBudget();
+        budget.RecordParticlePool(used: 4_000_000, capacity: 16_000_000);
+        budget.RecordParticlePool(used: 12_000_000, capacity: 16_000_000);
+        budget.RecordParticlePool(used: 5_000_000, capacity: 16_000_000);
+
+        Assert.Contains("pool 75% (12000000/16000000)", budget.Summary(maxLayers: 5));
+    }
 }
