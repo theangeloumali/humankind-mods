@@ -4,14 +4,25 @@ HUMANKIND_DIR="${HUMANKIND_DIR:-/mnt/d/SteamLibrary/steamapps/common/Humankind}"
 STEAM_EXE="${STEAM_EXE:-/mnt/c/Program Files (x86)/Steam/steam.exe}"
 # Humankind's Windows folders, derived from %USERPROFILE% (override with WIN_HOME, HK_DOCS or HK_LOCALLOW).
 WIN_HOME="${WIN_HOME:-$(wslpath "$(cd /mnt/c && cmd.exe /c 'echo %USERPROFILE%' 2>/dev/null | tr -d '\r')" 2>/dev/null)}"
+[ -n "${HK_DOCS:-}" ] && HK_DOCS_SET=1
 HK_DOCS="${HK_DOCS:-$WIN_HOME/Documents/Humankind}"
 HK_LOCALLOW="${HK_LOCALLOW:-$WIN_HOME/AppData/LocalLow/Amplitude Studios/Humankind}"
+
+# Tools that read the Windows folders call this first, so a missing cmd.exe stops them instead of reading "/Documents".
+require_windows_home() {
+  [ -n "$WIN_HOME" ] || [ -n "${HK_DOCS_SET:-}" ] || {
+    echo "Could not find the Windows home folder (is cmd.exe reachable?): set WIN_HOME or HK_DOCS." >&2
+    exit 1
+  }
+}
 BEPINEX_VERSION="5.4.23.6"
 INSTALLED_LIST="$HUMANKIND_DIR/BepInEx/.zk-installed-files"
 AUTOPLAY_DIR="$HUMANKIND_DIR/BepInEx/AutoPlay"
 DIAGNOSTICS_DIR="$HUMANKIND_DIR/BepInEx/CityRedraw"
 # Shared with the other game sessions on this PC (one game at a time: Steam, screen and focus are shared).
-GAME_LOCK="$HOME/.claude/state/game-access.lock"
+LEGACY_LOCK_DIR="$HOME/.claude/state"
+[ -d "$LEGACY_LOCK_DIR" ] && DEFAULT_LOCK="$LEGACY_LOCK_DIR/game-access.lock" || DEFAULT_LOCK="${XDG_STATE_HOME:-$HOME/.local/state}/game-access.lock"
+GAME_LOCK="${GAME_LOCK:-$DEFAULT_LOCK}"
 GAME_LOCK_SESSION="humankind-autoplay-bug-hunt"
 
 game_running() { tasklist.exe /FI "IMAGENAME eq Humankind.exe" 2>/dev/null | grep -qi '^Humankind.exe'; }

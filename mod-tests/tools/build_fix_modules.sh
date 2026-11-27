@@ -4,6 +4,7 @@
 set -euo pipefail
 H="$(cd "$(dirname "$0")" && pwd)"
 . "$H/../../scripts/lib.sh"
+require_windows_home
 PY="$H/../.venv/bin/python"
 OUT="$H/../build/fix-modules"
 INSTALL="${ZK_INSTALL_DIR:-$HK_DOCS/Community/ZKidz}"

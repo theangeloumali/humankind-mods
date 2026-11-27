@@ -15,9 +15,11 @@ namespace CityRedraw.Diagnostics
     {
         internal static readonly ParticleBudget Budget = new ParticleBudget();
 
+        private static readonly FrameMax BusiestRenderer = new FrameMax();
+
         /// <summary>The busiest renderer's layer count and how many its header buffer holds, as of the last frame.</summary>
-        internal static int CurrentLayers { get; private set; }
-        internal static int LayersThatFit { get; private set; }
+        internal static int CurrentLayers => Math.Max(0, BusiestRenderer.Value);
+        internal static int LayersThatFit => BusiestRenderer.Extra;
         private static int textureUsedPixels, textureTotalPixels;
 
         /// <summary>Peaks since the last call; the texture use is carried over because it only changes on a reallocation.</summary>
@@ -108,8 +110,7 @@ namespace CityRedraw.Diagnostics
                         FxComponentRenderer.GIRRenderSourceGeaderIndexPerLayer);
                     var count = Layers(renderer)?.Length ?? 0;
                     Budget.RecordLayerCount(count, fit);
-                    CurrentLayers = count;
-                    LayersThatFit = fit;
+                    BusiestRenderer.Observe(UnityEngine.Time.frameCount, count, fit);
                     if (error == null || exceptionLogged) return;
                     exceptionLogged = true;
                     Plugin.Log($"FillSharedGlobalData threw with {Layers(renderer)?.Length} layers, buffer fits {fit}: {error}");

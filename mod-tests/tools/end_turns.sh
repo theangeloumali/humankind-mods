@@ -3,6 +3,7 @@
 # Prints the number of turns that completed.
 H="$(dirname "$0")"
 . "$H/../../scripts/lib.sh"
+require_windows_home
 SAVES="$HK_DOCS/Save Files"
 ps() { powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w "$H/screen.ps1")" "$@" >/dev/null; }
 saves() { find "$SAVES" -name 'auto-save*.ctr' -newermt "$1" | wc -l; }

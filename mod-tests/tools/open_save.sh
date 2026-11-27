@@ -3,6 +3,7 @@
 # Prints IN-GAME once the map has loaded, so a caller can start inspecting.
 set -euo pipefail
 . "$(dirname "$0")/../../scripts/lib.sh"
+require_windows_home
 LOGS="$HK_DOCS/Temporary Files"
 
 require_game_closed

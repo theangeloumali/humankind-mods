@@ -11,7 +11,10 @@ def windows_home():
     if os.environ.get("WIN_HOME"):
         return os.environ["WIN_HOME"]
     profile = subprocess.run(["cmd.exe", "/c", "echo %USERPROFILE%"], capture_output=True, text=True, cwd="/mnt/c").stdout.strip()
-    return subprocess.run(["wslpath", profile], capture_output=True, text=True).stdout.strip()
+    home = subprocess.run(["wslpath", profile], capture_output=True, text=True).stdout.strip() if profile else ""
+    if not home:
+        raise RuntimeError("Could not find the Windows home folder (is cmd.exe reachable?): set WIN_HOME or HK_DOCS.")
+    return home
 
 
 def docs():

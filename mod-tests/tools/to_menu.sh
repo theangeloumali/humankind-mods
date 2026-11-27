@@ -2,6 +2,7 @@
 # Launches Humankind under the shared game lock and waits for the main menu: to_menu.sh <label>
 set -uo pipefail
 . "$(dirname "$0")/../../scripts/lib.sh"
+require_windows_home
 GAME_LOCK_SESSION="humankind-load-order-fix"
 HERE="$(dirname "$0")"
 LOGS="$HK_DOCS/Temporary Files"

@@ -46,6 +46,9 @@ while :; do
   sleep 20
 done
 
+# The target leaves the game open; hold the lock until it closes so another session cannot take Steam and the screen.
+while game_running; do renew_game_lock 60; sleep 30; done
+
 echo "--- autoplay progress (last 5) ---"
 tail -n 5 "$AUTOPLAY_DIR/progress.log" 2>/dev/null || true
 echo "--- diagnostics (last 5) ---"

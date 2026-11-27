@@ -5,6 +5,7 @@
 set -uo pipefail
 D=/mnt/d/SteamLibrary/steamapps/common/Humankind/BepInEx
 . "$(dirname "$0")/../../scripts/lib.sh"
+require_windows_home
 LOGS="$HK_DOCS/Temporary Files"
 start="$(date '+%F %T')"
 next=$(( $1 + 1 ))

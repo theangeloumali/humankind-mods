@@ -4,6 +4,7 @@
 set -uo pipefail
 H="$(cd "$(dirname "$0")" && pwd)"
 . "$H/../../scripts/lib.sh"
+require_windows_home
 LOGS="$HK_DOCS/Temporary Files"
 start="$(date '+%F %T')"
 for _ in $(seq 1 120); do

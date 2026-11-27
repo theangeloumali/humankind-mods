@@ -6,6 +6,7 @@ set -uo pipefail
 H="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$H/../.."
 . "$ROOT/scripts/lib.sh"
+require_windows_home
 PROGRESS=/mnt/d/SteamLibrary/steamapps/common/Humankind/BepInEx/AutoPlay/progress.log
 PLAYER_LOG="$HK_LOCALLOW/Player.log"
 order="$1" turn="$2" out="$3"

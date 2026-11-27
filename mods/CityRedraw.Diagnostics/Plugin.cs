@@ -45,8 +45,8 @@ namespace CityRedraw.Diagnostics
         private bool warningLogged;
         private ConfigEntry<int> layerFillTarget = null!;
         private readonly CameraTour tour = new CameraTour();
-        private GuardedHook updateHook = null!;
-        private Action updateBody = null!;
+        private readonly System.Collections.Generic.List<(GuardedHook Hook, Action Body)> updateSteps = new System.Collections.Generic.List<(GuardedHook Hook, Action Body)>();
+        private bool newTurn;
         private string outputDir = "";
         private bool active;
         private int lastTurn = -1;
@@ -93,8 +93,7 @@ namespace CityRedraw.Diagnostics
             layerFillTarget = Config.Bind("Diagnostics", "LayerFillTarget", 1000, "Layer count the fill key brings the busiest FX renderer to.");
             outputDir = Path.Combine(Paths.BepInExRootPath, "CityRedraw");
             log = new LineLog(Path.Combine(outputDir, "diagnostics.log"));
-            updateHook = NewHook("Plugin.Update");
-            updateBody = UpdateBody;
+            AddUpdateSteps();
             guiHook = NewHook("Plugin.OnGUI");
             guiBody = DrawLayerWarning;
             active = PluginSupport.TryPatchAll(PluginGuid, log, Logger, GameStateReader.EnsureReady);
@@ -102,7 +101,8 @@ namespace CityRedraw.Diagnostics
 
         private void Update()
         {
-            if (active) updateHook.Run(updateBody);
+            if (!active) return;
+            foreach (var (hook, body) in updateSteps) hook.Run(body);
         }
 
         private void OnGUI()
@@ -126,35 +126,52 @@ namespace CityRedraw.Diagnostics
             GUI.Box(new Rect((Screen.width - width) / 2, Screen.height * 0.08f, width, Screen.height * 0.06f), message, bannerStyle);
         }
 
-        private void UpdateBody()
+        // One guard per step: a throw switches off only that step, never the reload safety net with it.
+        private void AddUpdateSteps()
         {
-            if (reportKey.Value.IsDown()) WriteReport();
-            if (tourKey.Value.IsDown()) tour.Advance();
-            if (layerFillKey.Value.IsDown()) FxLayerFill.FillTo(layerFillTarget.Value);
-            if (reloadKey.Value.IsDown()) QuickReload.Start();
-            if (loadSaveKey.Value.IsDown() && loadSaveTitle.Value.Length > 0) QuickReload.LoadSave(loadSaveTitle.Value);
-            CaptureRequestedShot();
+            void Step(string name, Action body) => updateSteps.Add((NewHook("Update." + name), body));
+            Step("ReportKey", () => { if (reportKey.Value.IsDown()) WriteReport(); });
+            Step("TourKey", () => { if (tourKey.Value.IsDown()) tour.Advance(); });
+            Step("LayerFillKey", () => { if (layerFillKey.Value.IsDown()) FxLayerFill.FillTo(layerFillTarget.Value); });
+            Step("QuickReloadKey", () => { if (reloadKey.Value.IsDown()) QuickReload.Start(); });
+            Step("LoadSaveKey", () => { if (loadSaveKey.Value.IsDown() && loadSaveTitle.Value.Length > 0) QuickReload.LoadSave(loadSaveTitle.Value); });
+            Step("ShotRequest", CaptureRequestedShot);
+            Step("Contracts", WriteContractsOnce);
+            Step("AutoLoad", AutoLoadOnce);
+            Step("Turn", DetectNewTurn);
+            Step("AutoReload", () => { if (newTurn) ReloadIfLayersNearLimit(); });
+            Step("TurnShot", () => { if (newTurn) CaptureTurnShot(lastTurn); });
+            Step("TurnLog", () => { if (newTurn) LogTurn(lastTurn); });
+        }
+
+        private void WriteContractsOnce()
+        {
+            if (contractsWritten || PluginSupport.CurrentTurn() < 0) return;
+            if (!EntityContractDump.TryWrite(Path.Combine(outputDir, "entity-contracts.json"))) return;
+            contractsWritten = true;
+            log.Write("entity contracts written");
+        }
+
+        // Loading while the first game is still starting cancels its start (Game.DoStart throws), so wait.
+        private void AutoLoadOnce()
+        {
+            if (autoLoadDone || !autoLoadSave.Value || loadSaveTitle.Value.Length == 0) return;
+            if (PluginSupport.CurrentTurn() < 0 || !Amplitude.Mercury.Presentation.Presentation.HasBeenStarted) return;
+            if (autoLoadAt < 0f) autoLoadAt = Time.realtimeSinceStartup + 10f;
+            if (Time.realtimeSinceStartup < autoLoadAt) return;
+            autoLoadDone = true;
+            QuickReload.LoadSave(loadSaveTitle.Value);
+        }
+
+        private void DetectNewTurn()
+        {
             var turn = PluginSupport.CurrentTurn();
-            if (!contractsWritten && turn >= 0 && EntityContractDump.TryWrite(Path.Combine(outputDir, "entity-contracts.json")))
-            {
-                contractsWritten = true;
-                log.Write("entity contracts written");
-            }
+            newTurn = turn >= 0 && turn != lastTurn;
+            if (newTurn) lastTurn = turn;
+        }
 
-            // Loading while the first game is still starting cancels its start (Game.DoStart throws), so wait.
-            if (!autoLoadDone && autoLoadSave.Value && loadSaveTitle.Value.Length > 0 && turn >= 0 && Amplitude.Mercury.Presentation.Presentation.HasBeenStarted)
-            {
-                if (autoLoadAt < 0f) autoLoadAt = Time.realtimeSinceStartup + 10f;
-                if (Time.realtimeSinceStartup < autoLoadAt) return;
-                autoLoadDone = true;
-                QuickReload.LoadSave(loadSaveTitle.Value);
-                return;
-            }
-
-            if (turn == lastTurn || turn < 0) return;
-            lastTurn = turn;
-            ReloadIfLayersNearLimit();
-            CaptureTurnShot(turn);
+        private void LogTurn(int turn)
+        {
             log.Write($"turn {turn}: particle budget: {ParticleBudgetProbe.TakeSummary()}");
             if (MissingArt.Occurrences == lastMissingArt) return;
             log.Write($"turn {turn}: art lookups with no art {MissingArt.Occurrences}, distinct {MissingArt.DistinctSeen}");

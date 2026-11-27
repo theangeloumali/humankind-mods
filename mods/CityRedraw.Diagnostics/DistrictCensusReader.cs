@@ -22,8 +22,12 @@ namespace CityRedraw.Diagnostics
         /// (decompiled PresentationEntityFactoryController.SynchronizeDistrictInfo's release rule).</summary>
         public static (int Expected, int UnderConstruction) Expected()
         {
-            var info = Amplitude.Mercury.Interop.Snapshots.GameSnapshot.PresentationData.LocalEmpireInfo.DistrictInfo;
+            // Null while a save loads; a throw here used to switch off the whole Update hook.
+            var snapshot = Amplitude.Mercury.Interop.Snapshots.GameSnapshot;
+            if (snapshot?.PresentationData == null) return (0, 0);
+            var info = snapshot.PresentationData.LocalEmpireInfo.DistrictInfo;
             int expected = 0, underConstruction = 0;
+            if (info.Data == null) return (0, 0);
             for (var i = 0; i < info.Length; i++)
             {
                 ref var district = ref info.Data[i];

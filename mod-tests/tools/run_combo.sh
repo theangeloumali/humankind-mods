@@ -4,6 +4,7 @@
 set -uo pipefail
 H="$(dirname "$0")"
 . "$H/../../scripts/lib.sh"
+require_windows_home
 order="$1"
 label="$(basename "$order" .txt)"
 LOGS="$HK_DOCS/Temporary Files"
