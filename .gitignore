@@ -9,3 +9,9 @@ recordings/
 *.mp4
 *.webm
 .backup/
+
+# Private working notes and plans stay local.
+/humankind-*.md
+/humankind-*.mmd
+# Built against a private crate; not part of this repository.
+mod-tests/tools/hk-order/

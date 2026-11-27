@@ -2,6 +2,10 @@
 # Shared paths and guards for the Humankind mod scripts.
 HUMANKIND_DIR="${HUMANKIND_DIR:-/mnt/d/SteamLibrary/steamapps/common/Humankind}"
 STEAM_EXE="${STEAM_EXE:-/mnt/c/Program Files (x86)/Steam/steam.exe}"
+# Humankind's Windows folders, derived from %USERPROFILE% (override with WIN_HOME, HK_DOCS or HK_LOCALLOW).
+WIN_HOME="${WIN_HOME:-$(wslpath "$(cd /mnt/c && cmd.exe /c 'echo %USERPROFILE%' 2>/dev/null | tr -d '\r')" 2>/dev/null)}"
+HK_DOCS="${HK_DOCS:-$WIN_HOME/Documents/Humankind}"
+HK_LOCALLOW="${HK_LOCALLOW:-$WIN_HOME/AppData/LocalLow/Amplitude Studios/Humankind}"
 BEPINEX_VERSION="5.4.23.6"
 INSTALLED_LIST="$HUMANKIND_DIR/BepInEx/.zk-installed-files"
 AUTOPLAY_DIR="$HUMANKIND_DIR/BepInEx/AutoPlay"
